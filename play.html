@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>极限找牛 - 试玩</title>
+<style>
+  :root {
+    --bg: #f7f5f2;
+    --panel: #ffffff;
+    --ink: #2c2c2c;
+    --muted: #888;
+    --accent: #ff5c5c;
+    --ok: #4caf50;
+    --gap: 4px;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font: 15px/1.4 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--ink);
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh;
+  }
+  h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0.5px; }
+  .sub { color: var(--muted); margin-bottom: 16px; font-size: 13px; }
+  .rules {
+    background: var(--panel); padding: 10px 16px; border-radius: var(--radius);
+    margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    font-size: 13px; color: #555; max-width: 600px;
+  }
+  .rules b { color: var(--ink); }
+  .toolbar {
+    display: flex; gap: 8px; margin-bottom: 14px; align-items: center;
+    flex-wrap: wrap; justify-content: center;
+  }
+  button, select {
+    font: inherit; padding: 8px 14px; border: none; border-radius: 8px;
+    background: var(--panel); color: var(--ink); cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08); transition: transform 0.08s;
+  }
+  button:hover { transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  button.primary { background: var(--ink); color: white; }
+  .status {
+    background: var(--panel); padding: 8px 14px; border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08); font-size: 13px;
+    min-width: 140px; text-align: center;
+  }
+  .status .num { font-weight: 600; }
+  .status.win { background: var(--ok); color: white; }
+  .status.bad { background: #ffe5e5; color: var(--accent); }
+  #board {
+    display: grid; gap: var(--gap);
+    background: var(--panel); padding: var(--gap); border-radius: var(--radius);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  .cell {
+    aspect-ratio: 1; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; cursor: pointer;
+    transition: transform 0.06s, box-shadow 0.1s;
+    position: relative;
+  }
+  .cell.conflict { box-shadow: inset 0 0 0 3px var(--accent); }
+  .mark-x { color: rgba(255,255,255,0.95); font-weight: 700; text-shadow: 0 1px 1px rgba(0,0,0,0.2); pointer-events: none; }
+  .mark-cow { font-size: 1.5em; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); pointer-events: none; }
+  .badge {
+    position: absolute; top: 2px; right: 2px;
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; pointer-events: none;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  }
+  .badge.ok { background: var(--ok); color: white; }
+  .badge.bad { background: var(--accent); color: white; }
+  .cell.right-pulse { animation: rightPulse 0.5s ease; }
+  .cell.wrong-pulse { animation: wrongPulse 0.4s ease; }
+  @keyframes rightPulse {
+    0% { transform: scale(1); box-shadow: inset 0 0 0 0 var(--ok); }
+    40% { transform: scale(1.1); box-shadow: inset 0 0 0 3px var(--ok); }
+    100% { transform: scale(1); }
+  }
+  @keyframes wrongPulse {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-3px); }
+    75% { transform: translateX(3px); }
+  }
+  .hint-text { color: var(--muted); font-size: 12px; margin-top: 10px; text-align: center; max-width: 600px; }
+  .gen-overlay {
+    position: fixed; inset: 0; background: rgba(247,245,242,0.85);
+    display: none; align-items: center; justify-content: center;
+    z-index: 99; backdrop-filter: blur(2px);
+  }
+  .gen-overlay.show { display: flex; }
+  .spinner {
+    background: var(--panel); padding: 16px 24px; border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1); font-size: 14px;
+  }
+</style>
+</head>
+<body>
+  <h1>🔥 极限找牛 - 试玩 🔥</h1>
+  <div class="sub">血战到底</div>
+
+  <div class="rules">
+    <b>规则</b>: 每色 / 每行 / 每列 恰好 1 头牛;  任意两头牛不能 8-邻接.
+    <br><b>操作</b>: <b>拖拽</b>把路过的格子标 ✕,  <b>双击</b>放 / 移除 🐮.  红框 = 该牛违规.
+    <br><b>新题</b>: 每次刷新或点"新关"会随机生成一个唯一解谜题.
+  </div>
+
+  <div class="toolbar">
+    <label>大小: <select id="size">
+      <option value="5">5×5</option>
+      <option value="6">6×6</option>
+      <option value="7">7×7</option>
+      <option value="8" selected>8×8</option>
+      <option value="9">9×9</option>
+      <option value="10">10×10 (慢)</option>
+    </select></label>
+    <button id="newgame" class="primary">新关</button>
+    <button id="clear">清空</button>
+    <button id="hint">提示一头</button>
+    <button id="solve">显示解</button>
+    <span class="status" id="status">载入中...</span>
+  </div>
+
+  <div id="board"></div>
+
+  <div class="hint-text">
+    单文件 HTML, 浏览器双击打开就能玩.  关卡由本地 JS 实时生成 (确保唯一解).
+  </div>
+
+  <div class="gen-overlay" id="overlay"><div class="spinner" id="spinnerText">正在生成唯一解谜题...</div></div>
+
+<script>
+// ---------------- 调色板 (HSL 等距 12 色, 饱和 + 适中亮度, 易分辨) ----------------
+const PALETTE = [
+  "hsl(0, 70%, 65%)",    // 红
+  "hsl(28, 75%, 60%)",   // 橙
+  "hsl(50, 80%, 60%)",   // 金黄
+  "hsl(85, 55%, 55%)",   // 黄绿
+  "hsl(130, 50%, 55%)",  // 绿
+  "hsl(165, 55%, 50%)",  // 青绿
+  "hsl(190, 65%, 55%)",  // 青
+  "hsl(215, 70%, 65%)",  // 蓝
+  "hsl(255, 50%, 65%)",  // 紫蓝
+  "hsl(285, 50%, 60%)",  // 紫
+  "hsl(320, 65%, 65%)",  // 品红
+  "hsl(20, 35%, 55%)",   // 棕
+];
+
+const COW = "🐮";
+const MARK_EMPTY = 0, MARK_X = 1, MARK_COW = 2;
+
+// ---------------- 求解 / 数解 (按颜色稀有度回溯) ----------------
+function _bt_core(grid, limit /* null = solve, number = count */) {
+  const n = grid.length;
+  const colorCells = new Map();
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    const k = grid[r][c];
+    if (!colorCells.has(k)) colorCells.set(k, []);
+    colorCells.get(k).push([r, c]);
+  }
+  const order = [...colorCells.keys()].sort(
+    (a, b) => colorCells.get(a).length - colorCells.get(b).length
+  );
+  const rowCol = new Array(n).fill(-1);
+  let usedCols = 0n;
+  let count = 0;
+  let foundSol = null;
+  function bt(idx) {
+    if (idx === n) {
+      if (limit === null) { foundSol = rowCol.slice(); return true; }
+      count++;
+      return count >= limit;
+    }
+    for (const [r, c] of colorCells.get(order[idx])) {
+      if (rowCol[r] >= 0) continue;
+      const bc = 1n << BigInt(c);
+      if (usedCols & bc) continue;
+      if (r > 0 && rowCol[r-1] >= 0 && Math.abs(rowCol[r-1] - c) <= 1) continue;
+      if (r < n-1 && rowCol[r+1] >= 0 && Math.abs(rowCol[r+1] - c) <= 1) continue;
+      rowCol[r] = c;
+      usedCols |= bc;
+      if (bt(idx + 1)) return true;
+      rowCol[r] = -1;
+      usedCols ^= bc;
+    }
+    return false;
+  }
+  bt(0);
+  return limit === null ? foundSol : count;
+}
+function solve(grid) {
+  const sol = _bt_core(grid, null);
+  return sol ? sol.map((c, r) => [r, c]) : null;
+}
+function countSolutions(grid, limit) {
+  return _bt_core(grid, limit);
+}
+
+// ---------------- 生成器 ----------------
+function shuffled(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function randomPlacement(n) {
+  const cols = new Array(n).fill(-1);
+  const used = new Set();
+  function bt(row) {
+    if (row === n) return true;
+    for (const c of shuffled([...Array(n).keys()])) {
+      if (used.has(c)) continue;
+      if (row > 0 && Math.abs(cols[row-1] - c) <= 1) continue;
+      cols[row] = c; used.add(c);
+      if (bt(row + 1)) return true;
+      cols[row] = -1; used.delete(c);
+    }
+    return false;
+  }
+  return bt(0) ? cols : null;
+}
+
+function floodColor(n, seeds) {
+  const grid = Array.from({length: n}, () => new Array(n).fill(-1));
+  const fronts = seeds.map(([r, c], color) => {
+    grid[r][c] = color;
+    return [[r, c]];
+  });
+  let remaining = n * n - n;
+  while (remaining > 0) {
+    let progressed = false;
+    for (const color of shuffled([...Array(n).keys()])) {
+      const fr = fronts[color];
+      if (fr.length === 0) continue;
+      const idx = Math.floor(Math.random() * fr.length);
+      const [r, c] = fr[idx];
+      const neigh = shuffled([[-1,0],[1,0],[0,-1],[0,1]]);
+      let grew = false;
+      for (const [dr, dc] of neigh) {
+        const nr = r + dr, nc = c + dc;
+        if (nr >= 0 && nr < n && nc >= 0 && nc < n && grid[nr][nc] === -1) {
+          grid[nr][nc] = color;
+          fr.push([nr, nc]);
+          remaining--;
+          grew = true;
+          progressed = true;
+          break;
+        }
+      }
+      if (!grew) fr.splice(idx, 1);
+    }
+    if (!progressed) break;
+  }
+  // 兜底: 反复扫直到没有 -1 (避免遗漏 -> 多出"第 N+1 色")
+  let safety = n * n;
+  while (safety-- > 0) {
+    let anyLeft = false, filled = false;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (grid[r][c] !== -1) continue;
+      anyLeft = true;
+      for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+        const nr = r+dr, nc = c+dc;
+        if (nr >= 0 && nr < n && nc >= 0 && nc < n && grid[nr][nc] !== -1) {
+          grid[r][c] = grid[nr][nc]; filled = true; break;
+        }
+      }
+    }
+    if (!anyLeft || !filled) break;
+  }
+  return grid;
+}
+
+function gridIsValid(grid, n) {
+  const colors = new Set();
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (grid[r][c] < 0) return false;
+    colors.add(grid[r][c]);
+  }
+  return colors.size === n;  // 恰好 N 色
+}
+
+// 同步生成 (小 N 够快). 返回 {grid, n_sols} 或 null
+function generateSync(n, maxTries, timeBudgetMs) {
+  const start = performance.now();
+  let bestSolvable = null;
+  for (let i = 0; i < maxTries; i++) {
+    if (performance.now() - start > timeBudgetMs) break;
+    const placement = randomPlacement(n);
+    if (!placement) continue;
+    const seeds = placement.map((c, r) => [r, c]);
+    const grid = floodColor(n, seeds);
+    if (!gridIsValid(grid, n)) continue;  // 严格 N 色
+    const c = countSolutions(grid, 2);
+    if (c === 1) return { grid, unique: true };
+    if (c >= 1 && !bestSolvable) bestSolvable = grid;
+  }
+  return bestSolvable ? { grid: bestSolvable, unique: false } : null;
+}
+
+// 异步生成 (大 N 需要让 UI 喘气). 每帧跑一批.
+async function generateAsync(n) {
+  const overlay = document.getElementById("overlay");
+  const spinner = document.getElementById("spinnerText");
+  overlay.classList.add("show");
+  const start = performance.now();
+  let tries = 0;
+  let bestSolvable = null;
+  while (performance.now() - start < 8000) {
+    // 一批 (一帧内不超过 ~30ms)
+    const batchStart = performance.now();
+    while (performance.now() - batchStart < 30) {
+      tries++;
+      const placement = randomPlacement(n);
+      if (!placement) continue;
+      const seeds = placement.map((c, r) => [r, c]);
+      const grid = floodColor(n, seeds);
+      if (!gridIsValid(grid, n)) continue;
+      const c = countSolutions(grid, 2);
+      if (c === 1) {
+        overlay.classList.remove("show");
+        return { grid, unique: true, tries };
+      }
+      if (c >= 1 && !bestSolvable) bestSolvable = grid;
+    }
+    spinner.textContent = `生成中... (${tries} 次尝试)`;
+    await new Promise(r => requestAnimationFrame(r));
+  }
+  overlay.classList.remove("show");
+  return bestSolvable ? { grid: bestSolvable, unique: false, tries } : null;
+}
+
+// ---------------- 状态 ----------------
+let G = null;  // { grid, n, marks, unique }
+
+async function loadNew(n) {
+  let result;
+  if (n <= 8) {
+    result = generateSync(n, 5000, 1500);
+  } else {
+    result = await generateAsync(n);
+  }
+  if (!result) {
+    document.getElementById("status").textContent = "生成失败, 重试...";
+    setTimeout(() => loadNew(n), 50);
+    return;
+  }
+  // 已知唯一解 -> 直接求一次, 用于即时对错反馈
+  const sol = solve(result.grid);
+  const solSet = new Set(sol ? sol.map(([r, c]) => r * n + c) : []);
+  // 颜色总数
+  const colors = new Set();
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) colors.add(result.grid[r][c]);
+  G = {
+    grid: result.grid, n,
+    marks: Array.from({length: n}, () => Array(n).fill(MARK_EMPTY)),
+    unique: result.unique,
+    solSet, nColors: colors.size,
+    pulses: {},  // key "r,c" -> "right"|"wrong"
+  };
+  render();
+}
+
+// ---------------- 渲染 ----------------
+function render() {
+  const { grid, n, marks } = G;
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  const size = Math.min(600, window.innerWidth - 48, window.innerHeight - 280);
+  const cell = (size - (n + 1) * 4) / n;
+  board.style.gridTemplateColumns = `repeat(${n}, ${cell}px)`;
+  board.style.width = (cell * n + (n + 1) * 4) + "px";
+
+  const conflicts = findConflicts();
+
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      const div = document.createElement("div");
+      div.className = "cell";
+      div.dataset.r = r; div.dataset.c = c;
+      div.style.background = PALETTE[grid[r][c] % PALETTE.length];
+      const m = marks[r][c];
+      if (m === MARK_X) div.innerHTML = `<span class="mark-x">✕</span>`;
+      else if (m === MARK_COW) {
+        div.innerHTML = `<span class="mark-cow">${COW}</span>`;
+        if (conflicts.has(r * n + c)) div.classList.add("conflict");
+        // 即时对错: 与已知唯一解比对
+        const correct = G.solSet.has(r * n + c);
+        const badge = document.createElement("div");
+        badge.className = "badge " + (correct ? "ok" : "bad");
+        badge.textContent = correct ? "✓" : "✕";
+        div.appendChild(badge);
+        const pk = `${r},${c}`;
+        if (G.pulses[pk]) {
+          div.classList.add(G.pulses[pk] === "right" ? "right-pulse" : "wrong-pulse");
+          delete G.pulses[pk];
+        }
+      }
+      board.appendChild(div);
+    }
+  }
+  updateStatus(conflicts);
+}
+
+function findConflicts() {
+  const { grid, n, marks } = G;
+  const bad = new Set();
+  const cows = [];
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+    if (marks[r][c] === MARK_COW) cows.push([r, c]);
+  const rm = new Map(), cm = new Map(), km = new Map();
+  cows.forEach(([r, c]) => {
+    [[rm, r], [cm, c], [km, grid[r][c]]].forEach(([m, k]) => {
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push([r, c]);
+    });
+  });
+  [rm, cm, km].forEach(m => m.forEach(a => {
+    if (a.length > 1) a.forEach(([r, c]) => bad.add(r * n + c));
+  }));
+  for (let i = 0; i < cows.length; i++) for (let j = i + 1; j < cows.length; j++) {
+    const [r1, c1] = cows[i], [r2, c2] = cows[j];
+    if (Math.max(Math.abs(r1 - r2), Math.abs(c1 - c2)) <= 1) {
+      bad.add(r1 * n + c1); bad.add(r2 * n + c2);
+    }
+  }
+  return bad;
+}
+
+function updateStatus(conflicts) {
+  const { n, marks, solSet } = G;
+  let cows = 0, correct = 0;
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (marks[r][c] === MARK_COW) {
+      cows++;
+      if (solSet.has(r * n + c)) correct++;
+    }
+  }
+  const status = document.getElementById("status");
+  if (correct === n && cows === n) {
+    status.className = "status win";
+    status.innerHTML = `🎉 完成! ${n}×${n}`;
+  } else if (cows > n) {
+    status.className = "status bad";
+    status.innerHTML = `🐮 ${cows}/${n}  超出!  正确 ${correct}`;
+  } else {
+    const cls = correct === cows ? "status" : "status bad";
+    status.className = cls;
+    status.innerHTML = `🐮 ${cows}/${n}  正确 ${correct}`;
+  }
+}
+
+// ---------------- 交互: 拖拽标 X, 双击放牛 ----------------
+let dragging = false;
+let dragMoved = false;
+let pendingClick = null;  // {r, c, timer}
+let downCell = null;
+
+function cellAtPoint(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (el && el.classList.contains("cell"))
+    return [+el.dataset.r, +el.dataset.c];
+  return null;
+}
+
+function paintX(r, c) {
+  if (G.marks[r][c] === MARK_COW) return;
+  if (G.marks[r][c] === MARK_X) return;  // 别覆盖
+  G.marks[r][c] = MARK_X;
+  render();
+}
+
+const board = document.getElementById("board");
+
+board.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  const pt = cellAtPoint(e.clientX, e.clientY);
+  if (!pt) return;
+  dragging = true; dragMoved = false; downCell = pt;
+  board.setPointerCapture(e.pointerId);
+});
+
+board.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  const pt = cellAtPoint(e.clientX, e.clientY);
+  if (!pt) return;
+  if (!dragMoved && (pt[0] !== downCell[0] || pt[1] !== downCell[1])) {
+    dragMoved = true;
+    paintX(downCell[0], downCell[1]);  // 也涂起点
+  }
+  if (dragMoved) paintX(pt[0], pt[1]);
+});
+
+board.addEventListener("pointerup", (e) => {
+  if (!dragging) return;
+  dragging = false;
+  if (dragMoved) {
+    downCell = null;
+    return;
+  }
+  // 单击 (没拖) -> 等 250ms, 如果不是双击就 toggle X
+  const pt = downCell;
+  downCell = null;
+  if (pendingClick) {
+    clearTimeout(pendingClick.timer);
+    pendingClick = null;
+  }
+  pendingClick = {
+    r: pt[0], c: pt[1],
+    timer: setTimeout(() => {
+      pendingClick = null;
+      const [r, c] = pt;
+      // 单击 toggle X (cow 状态保持不变, 避免误删)
+      if (G.marks[r][c] === MARK_COW) return;
+      G.marks[r][c] = G.marks[r][c] === MARK_X ? MARK_EMPTY : MARK_X;
+      render();
+    }, 250),
+  };
+});
+
+board.addEventListener("dblclick", (e) => {
+  e.preventDefault();
+  if (pendingClick) {
+    clearTimeout(pendingClick.timer);
+    pendingClick = null;
+  }
+  const pt = cellAtPoint(e.clientX, e.clientY);
+  if (!pt) return;
+  const [r, c] = pt;
+  if (G.marks[r][c] === MARK_COW) {
+    G.marks[r][c] = MARK_EMPTY;
+  } else {
+    G.marks[r][c] = MARK_COW;
+    // 即时对错动画
+    const correct = G.solSet.has(r * G.n + c);
+    G.pulses[`${r},${c}`] = correct ? "right" : "wrong";
+  }
+  render();
+});
+
+// 右键: 直接清空格子
+board.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  const pt = cellAtPoint(e.clientX, e.clientY);
+  if (!pt) return;
+  G.marks[pt[0]][pt[1]] = MARK_EMPTY;
+  render();
+});
+
+// ---------------- 按钮 ----------------
+const sizeSel = document.getElementById("size");
+document.getElementById("newgame").addEventListener("click", () => {
+  loadNew(+sizeSel.value);
+});
+document.getElementById("clear").addEventListener("click", () => {
+  G.marks = Array.from({length: G.n}, () => Array(G.n).fill(MARK_EMPTY));
+  render();
+});
+document.getElementById("solve").addEventListener("click", () => {
+  const sol = solve(G.grid);
+  if (!sol) return;
+  G.marks = Array.from({length: G.n}, () => Array(G.n).fill(MARK_EMPTY));
+  sol.forEach(([r, c]) => G.marks[r][c] = MARK_COW);
+  render();
+});
+document.getElementById("hint").addEventListener("click", () => {
+  const sol = solve(G.grid);
+  if (!sol) return;
+  for (const [r, c] of sol) {
+    if (G.marks[r][c] !== MARK_COW) {
+      G.marks[r][c] = MARK_COW;
+      render(); return;
+    }
+  }
+});
+sizeSel.addEventListener("change", () => loadNew(+sizeSel.value));
+
+window.addEventListener("resize", () => G && render());
+
+// ---------------- 启动: 默认 8x8 ----------------
+loadNew(+sizeSel.value);
+</script>
+</body>
+</html>
