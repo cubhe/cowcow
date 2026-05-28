@@ -471,6 +471,7 @@ function updateStatus(conflicts) {
   }
   const status = document.getElementById("status");
   if (correct === n && cows === n) {
+    if (status.className !== "status win") vibrate([80, 40, 80, 40, 120]);  // 胜利彩蛋
     status.className = "status win";
     status.innerHTML = `🎉 完成! ${n}×${n}`;
   } else if (cows > n) {
@@ -505,12 +506,21 @@ function paintX(r, c) {
   render();
 }
 
+function vibrate(pattern) {
+  if (navigator.vibrate) {
+    try { navigator.vibrate(pattern); } catch (_) {}
+  }
+}
+
 function toggleCow(r, c) {
   if (G.marks[r][c] === MARK_COW) {
     G.marks[r][c] = MARK_EMPTY;
+    vibrate(15);  // 移除: 极轻
   } else {
     G.marks[r][c] = MARK_COW;
-    G.pulses[`${r},${c}`] = G.solSet.has(r * G.n + c) ? "right" : "wrong";
+    const correct = G.solSet.has(r * G.n + c);
+    G.pulses[`${r},${c}`] = correct ? "right" : "wrong";
+    vibrate(correct ? 20 : [40, 30, 40]);  // 对: 短促; 错: 双拍
   }
   render();
 }
