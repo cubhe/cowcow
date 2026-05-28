@@ -65,7 +65,8 @@
     position: relative;
   }
   .cell.conflict { box-shadow: inset 0 0 0 3px var(--accent); }
-  .mark-x { color: rgba(255,255,255,0.95); font-weight: 700; text-shadow: 0 1px 1px rgba(0,0,0,0.2); pointer-events: none; }
+  .mark-x { width: 62%; height: 62%; pointer-events: none; display: block; }
+  .mark-x line { stroke: rgba(40, 40, 40, 0.62); stroke-width: 3.5; stroke-linecap: round; }
   .mark-cow { font-size: 1.5em; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); pointer-events: none; }
   .badge {
     position: absolute; top: 2px; right: 2px;
@@ -416,7 +417,7 @@ function render() {
       div.dataset.r = r; div.dataset.c = c;
       div.style.background = PALETTE[grid[r][c] % PALETTE.length];
       const m = marks[r][c];
-      if (m === MARK_X) div.innerHTML = `<span class="mark-x">✕</span>`;
+      if (m === MARK_X) div.innerHTML = `<svg class="mark-x" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>`;
       else if (m === MARK_COW) {
         div.innerHTML = `<span class="mark-cow">${COW}</span>`;
         if (conflicts.has(r * n + c)) div.classList.add("conflict");
@@ -486,11 +487,13 @@ function updateStatus(conflicts) {
   }
 }
 
-// ---------------- 交互: 拖拽标 X, 双击放牛 ----------------
+// ---------------- 交互: 拖拽标 X, 双击 / 双击放牛 (鼠标 + 触屏统一) ----------------
 let dragging = false;
 let dragMoved = false;
-let pendingClick = null;  // {r, c, timer}
 let downCell = null;
+let pendingClick = null;          // 等待中的"单击 -> X" 定时器
+let lastTap = { r: -1, c: -1, t: 0 };  // 上一次成功的单击时间, 用于检测双击
+const DOUBLE_TAP_MS = 350;
 
 function cellAtPoint(x, y) {
   const el = document.elementFromPoint(x, y);
@@ -501,8 +504,24 @@ function cellAtPoint(x, y) {
 
 function paintX(r, c) {
   if (G.marks[r][c] === MARK_COW) return;
-  if (G.marks[r][c] === MARK_X) return;  // 别覆盖
+  if (G.marks[r][c] === MARK_X) return;
   G.marks[r][c] = MARK_X;
+  render();
+}
+
+function toggleCow(r, c) {
+  if (G.marks[r][c] === MARK_COW) {
+    G.marks[r][c] = MARK_EMPTY;
+  } else {
+    G.marks[r][c] = MARK_COW;
+    G.pulses[`${r},${c}`] = G.solSet.has(r * G.n + c) ? "right" : "wrong";
+  }
+  render();
+}
+
+function toggleX(r, c) {
+  if (G.marks[r][c] === MARK_COW) return;
+  G.marks[r][c] = G.marks[r][c] === MARK_X ? MARK_EMPTY : MARK_X;
   render();
 }
 
@@ -513,7 +532,7 @@ board.addEventListener("pointerdown", (e) => {
   const pt = cellAtPoint(e.clientX, e.clientY);
   if (!pt) return;
   dragging = true; dragMoved = false; downCell = pt;
-  board.setPointerCapture(e.pointerId);
+  try { board.setPointerCapture(e.pointerId); } catch (_) {}
 });
 
 board.addEventListener("pointermove", (e) => {
@@ -522,7 +541,7 @@ board.addEventListener("pointermove", (e) => {
   if (!pt) return;
   if (!dragMoved && (pt[0] !== downCell[0] || pt[1] !== downCell[1])) {
     dragMoved = true;
-    paintX(downCell[0], downCell[1]);  // 也涂起点
+    paintX(downCell[0], downCell[1]);
   }
   if (dragMoved) paintX(pt[0], pt[1]);
 });
@@ -530,48 +549,34 @@ board.addEventListener("pointermove", (e) => {
 board.addEventListener("pointerup", (e) => {
   if (!dragging) return;
   dragging = false;
-  if (dragMoved) {
-    downCell = null;
-    return;
-  }
-  // 单击 (没拖) -> 等 250ms, 如果不是双击就 toggle X
-  const pt = downCell;
+  if (dragMoved) { downCell = null; return; }
+
+  const [r, c] = downCell;
   downCell = null;
-  if (pendingClick) {
-    clearTimeout(pendingClick.timer);
-    pendingClick = null;
+  const now = performance.now();
+  const isDouble = (lastTap.r === r && lastTap.c === c && (now - lastTap.t) < DOUBLE_TAP_MS);
+
+  // 取消任何"待发"的单击
+  if (pendingClick) { clearTimeout(pendingClick.timer); pendingClick = null; }
+
+  if (isDouble) {
+    lastTap = { r: -1, c: -1, t: 0 };
+    toggleCow(r, c);
+  } else {
+    // 记下本次为"潜在双击的第一击", 同时延迟 DOUBLE_TAP_MS 后才把它当 X
+    lastTap = { r, c, t: now };
+    pendingClick = {
+      timer: setTimeout(() => {
+        pendingClick = null;
+        toggleX(r, c);
+      }, DOUBLE_TAP_MS),
+    };
   }
-  pendingClick = {
-    r: pt[0], c: pt[1],
-    timer: setTimeout(() => {
-      pendingClick = null;
-      const [r, c] = pt;
-      // 单击 toggle X (cow 状态保持不变, 避免误删)
-      if (G.marks[r][c] === MARK_COW) return;
-      G.marks[r][c] = G.marks[r][c] === MARK_X ? MARK_EMPTY : MARK_X;
-      render();
-    }, 250),
-  };
 });
 
+// 鼠标 dblclick (双重保险, pointerup 已覆盖, 但有些浏览器仍会触发)
 board.addEventListener("dblclick", (e) => {
   e.preventDefault();
-  if (pendingClick) {
-    clearTimeout(pendingClick.timer);
-    pendingClick = null;
-  }
-  const pt = cellAtPoint(e.clientX, e.clientY);
-  if (!pt) return;
-  const [r, c] = pt;
-  if (G.marks[r][c] === MARK_COW) {
-    G.marks[r][c] = MARK_EMPTY;
-  } else {
-    G.marks[r][c] = MARK_COW;
-    // 即时对错动画
-    const correct = G.solSet.has(r * G.n + c);
-    G.pulses[`${r},${c}`] = correct ? "right" : "wrong";
-  }
-  render();
 });
 
 // 右键: 直接清空格子
