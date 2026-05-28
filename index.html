@@ -123,6 +123,7 @@
     <button id="clear">清空</button>
     <button id="hint">提示一头</button>
     <button id="solve">显示解</button>
+    <button id="mute" title="切换音效">🔊</button>
     <span class="status" id="status">载入中...</span>
   </div>
 
@@ -471,7 +472,10 @@ function updateStatus(conflicts) {
   }
   const status = document.getElementById("status");
   if (correct === n && cows === n) {
-    if (status.className !== "status win") vibrate([80, 40, 80, 40, 120]);  // 胜利彩蛋
+    if (status.className !== "status win") {
+      vibrate([80, 40, 80, 40, 120]);
+      soundWin();
+    }
     status.className = "status win";
     status.innerHTML = `🎉 完成! ${n}×${n}`;
   } else if (cows > n) {
@@ -512,15 +516,55 @@ function vibrate(pattern) {
   }
 }
 
+// ---------------- 音效 (Web Audio 合成, 无需外部文件) ----------------
+let audioCtx = null;
+let soundOn = localStorage.getItem("cowcow_sound") !== "0";
+
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (_) { return null; }
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+function tone(freq, dur, type = "sine", vol = 0.12, delay = 0) {
+  if (!soundOn) return;
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const t0 = ctx.currentTime + delay;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
+}
+
+function soundCorrect() { tone(523.25, 0.08); tone(659.25, 0.12, "sine", 0.12, 0.05); }
+function soundWrong()   { tone(196,   0.18, "triangle", 0.12); }
+function soundRemove()  { tone(440,   0.05, "sine", 0.08); }
+function soundWin() {
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) =>
+    tone(f, 0.18, "sine", 0.13, i * 0.09));
+}
+
 function toggleCow(r, c) {
   if (G.marks[r][c] === MARK_COW) {
     G.marks[r][c] = MARK_EMPTY;
-    vibrate(15);  // 移除: 极轻
+    vibrate(15);
+    soundRemove();
   } else {
     G.marks[r][c] = MARK_COW;
     const correct = G.solSet.has(r * G.n + c);
     G.pulses[`${r},${c}`] = correct ? "right" : "wrong";
-    vibrate(correct ? 20 : [40, 30, 40]);  // 对: 短促; 错: 双拍
+    if (correct) { vibrate(20); soundCorrect(); }
+    else { vibrate([40, 30, 40]); soundWrong(); }
   }
   render();
 }
@@ -621,6 +665,16 @@ document.getElementById("hint").addEventListener("click", () => {
   }
 });
 sizeSel.addEventListener("change", () => loadNew(+sizeSel.value));
+
+const muteBtn = document.getElementById("mute");
+function refreshMuteBtn() { muteBtn.textContent = soundOn ? "🔊" : "🔇"; }
+refreshMuteBtn();
+muteBtn.addEventListener("click", () => {
+  soundOn = !soundOn;
+  localStorage.setItem("cowcow_sound", soundOn ? "1" : "0");
+  refreshMuteBtn();
+  if (soundOn) tone(880, 0.08);  // 切回有声: 给个回执
+});
 
 window.addEventListener("resize", () => G && render());
 
