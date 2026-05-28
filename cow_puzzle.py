@@ -139,9 +139,23 @@ def _random_placement(n: int, rng: random.Random) -> Optional[Solution]:
 
 
 def _flood_color(n: int, seeds: Solution, rng: random.Random) -> Grid:
-    """以牛为种子, 各色轮流扩 1 格, 得到形状还算紧凑且各色都有 ≥1 格的初始划分."""
+    """各色轮流扩, 但给每色随机一个 size cap (1..N+2) -> 区域大小分布更不均.
+    单元格/小区域强制唯一定位 -> 唯一解概率显著提升."""
     grid: Grid = [[-1] * n for _ in range(n)]
     fronts: List[List[Tuple[int, int]]] = [[] for _ in range(n)]
+    sizes = [1] * n  # 当前已染色数
+    # 给每色一个目标 size cap; 总和 >= N*N 才能填满
+    base = (n * n) / n  # 平均 N
+    caps: List[int] = []
+    while True:
+        caps = [max(1, int(rng.gauss(base, base * 0.55))) for _ in range(n)]
+        # 让 1-2 个区域强制为 1-2 格 (强约束)
+        small_n = rng.randint(1, max(1, n // 4))
+        for i in rng.sample(range(n), small_n):
+            caps[i] = rng.randint(1, 2)
+        if sum(caps) >= n * n:
+            break
+
     for color, (r, c) in enumerate(seeds):
         grid[r][c] = color
         fronts[color].append((r, c))
@@ -151,7 +165,7 @@ def _flood_color(n: int, seeds: Solution, rng: random.Random) -> Grid:
         rng.shuffle(order)
         progressed = False
         for color in order:
-            if not fronts[color]:
+            if sizes[color] >= caps[color] or not fronts[color]:
                 continue
             idx = rng.randrange(len(fronts[color]))
             r, c = fronts[color][idx]
@@ -162,12 +176,19 @@ def _flood_color(n: int, seeds: Solution, rng: random.Random) -> Grid:
                 if 0 <= nr < n and 0 <= nc < n and grid[nr][nc] == -1:
                     grid[nr][nc] = color
                     fronts[color].append((nr, nc))
+                    sizes[color] += 1
                     remaining -= 1
                     grew = True
                     progressed = True
                     break
             if not grew:
                 fronts[color].pop(idx)
+        if not progressed:
+            # 还有空格但所有色都到 cap 或扩不出去: 放宽 cap 再来一轮
+            if remaining > 0:
+                for i in range(n):
+                    caps[i] += 1
+                continue
         if not progressed:
             # 边角孤立空格: 直接接给某个 4-邻居
             for r in range(n):

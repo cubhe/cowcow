@@ -115,10 +115,8 @@
     <label>大小: <select id="size">
       <option value="5">5×5</option>
       <option value="6">6×6</option>
-      <option value="7">7×7</option>
-      <option value="8" selected>8×8</option>
-      <option value="9">9×9</option>
-      <option value="10">10×10 (慢)</option>
+      <option value="7" selected>7×7</option>
+      <option value="8">8×8 (生成稍慢)</option>
     </select></label>
     <button id="newgame" class="primary">新关</button>
     <button id="clear">清空</button>
@@ -229,16 +227,37 @@ function randomPlacement(n) {
   return bt(0) ? cols : null;
 }
 
+function gaussian() {
+  // Box-Muller
+  let u = 0, v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
 function floodColor(n, seeds) {
   const grid = Array.from({length: n}, () => new Array(n).fill(-1));
   const fronts = seeds.map(([r, c], color) => {
     grid[r][c] = color;
     return [[r, c]];
   });
+  // 每色随机一个 size cap; 1-2 色强制极小 -> 单元格强约束
+  const base = n;  // 平均每色 N 格
+  let caps;
+  while (true) {
+    caps = Array.from({length: n}, () => Math.max(1, Math.round(base + gaussian() * base * 0.55)));
+    const smallN = 1 + Math.floor(Math.random() * Math.max(1, n / 4));
+    const idxs = shuffled([...Array(n).keys()]).slice(0, smallN);
+    for (const i of idxs) caps[i] = 1 + Math.floor(Math.random() * 2);
+    if (caps.reduce((a, b) => a + b, 0) >= n * n) break;
+  }
+  const sizes = new Array(n).fill(1);
+
   let remaining = n * n - n;
   while (remaining > 0) {
     let progressed = false;
     for (const color of shuffled([...Array(n).keys()])) {
+      if (sizes[color] >= caps[color]) continue;
       const fr = fronts[color];
       if (fr.length === 0) continue;
       const idx = Math.floor(Math.random() * fr.length);
@@ -250,6 +269,7 @@ function floodColor(n, seeds) {
         if (nr >= 0 && nr < n && nc >= 0 && nc < n && grid[nr][nc] === -1) {
           grid[nr][nc] = color;
           fr.push([nr, nc]);
+          sizes[color]++;
           remaining--;
           grew = true;
           progressed = true;
@@ -258,7 +278,13 @@ function floodColor(n, seeds) {
       }
       if (!grew) fr.splice(idx, 1);
     }
-    if (!progressed) break;
+    if (!progressed) {
+      if (remaining > 0) {
+        for (let i = 0; i < n; i++) caps[i]++;
+        continue;
+      }
+      break;
+    }
   }
   // 兜底: 反复扫直到没有 -1 (避免遗漏 -> 多出"第 N+1 色")
   let safety = n * n;
@@ -314,7 +340,8 @@ async function generateAsync(n) {
   const start = performance.now();
   let tries = 0;
   let bestSolvable = null;
-  while (performance.now() - start < 8000) {
+  // 只在唯一解时返回, 多解直接丢; 失败兜底再用多解
+  while (performance.now() - start < 6000) {
     // 一批 (一帧内不超过 ~30ms)
     const batchStart = performance.now();
     while (performance.now() - batchStart < 30) {
@@ -343,9 +370,10 @@ let G = null;  // { grid, n, marks, unique }
 
 async function loadNew(n) {
   let result;
-  if (n <= 8) {
+  if (n <= 7) {
     result = generateSync(n, 5000, 1500);
   } else {
+    // N=8 用异步, 给到 5s 预算保证唯一解
     result = await generateAsync(n);
   }
   if (!result) {
