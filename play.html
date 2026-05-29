@@ -118,6 +118,15 @@
       <option value="6">6×6</option>
       <option value="7">7×7</option>
       <option value="8">8×8 (生成稍慢)</option>
+      <option value="9">9×9 (预生成)</option>
+      <option value="10">10×10 (预生成)</option>
+    </select></label>
+    <label>难度: <select id="difficulty">
+      <option value="t1">★ 入门</option>
+      <option value="t2">★★ 简单</option>
+      <option value="t3" selected>★★★ 中等</option>
+      <option value="t4">★★★★ 困难</option>
+      <option value="t5">★★★★★ 大师</option>
     </select></label>
     <button id="newgame" class="primary">新关</button>
     <button id="clear">清空</button>
@@ -135,6 +144,7 @@
 
   <div class="gen-overlay" id="overlay"><div class="spinner" id="spinnerText">正在生成唯一解谜题...</div></div>
 
+<script src="puzzles_pool.js"></script>
 <script>
 // ---------------- 调色板 (8 色, 同色族只留一个; 前 5 个跨色环, N=5 时最分明) ----------------
 const PALETTE = [
@@ -368,7 +378,25 @@ let G = null;  // { grid, n, marks, unique }
 
 async function loadNew(n) {
   let result;
-  if (n <= 7) {
+  // 先看预生成池 (N=9, 10 由 puzzles_pool.js 提供; 浏览器实时生成太慢)
+  const tiers = window.PUZZLE_POOL && (window.PUZZLE_POOL[n] || window.PUZZLE_POOL[String(n)]);
+  const diff = document.getElementById("difficulty").value;
+  // tiers 兼容: 5档 {t1..t5}, 老 3档 {easy/medium/hard}, 或裸数组
+  let bag = null;
+  if (Array.isArray(tiers)) bag = tiers;
+  else if (tiers) {
+    bag = tiers[diff]
+       || tiers.t3 || tiers.medium
+       || tiers.t2 || tiers.easy
+       || tiers.t4 || tiers.hard
+       || tiers.t1 || tiers.t5;
+  }
+  if (bag && bag.length) {
+    const item = bag[Math.floor(Math.random() * bag.length)];
+    const rows = item.rows || item;  // 兼容: {rows, nodes} 或 直接 rows
+    const grid = rows.map(s => Array.from(s).map(ch => parseInt(ch, 36)));
+    result = { grid, unique: true, nodes: item.nodes };
+  } else if (n <= 7) {
     result = generateSync(n, 5000, 1500);
   } else {
     // N=8 用异步, 给到 5s 预算保证唯一解
@@ -665,6 +693,7 @@ document.getElementById("hint").addEventListener("click", () => {
   }
 });
 sizeSel.addEventListener("change", () => loadNew(+sizeSel.value));
+document.getElementById("difficulty").addEventListener("change", () => loadNew(+sizeSel.value));
 
 const muteBtn = document.getElementById("mute");
 function refreshMuteBtn() { muteBtn.textContent = soundOn ? "🔊" : "🔇"; }

@@ -70,6 +70,46 @@ def solve(grid: Grid) -> Optional[Solution]:
     return None
 
 
+def score_difficulty(grid: Grid) -> int:
+    """难度评分 = 验证唯一解所遍历的回溯节点数.
+    单元格色 / 强约束 → 树窄 → nodes 小 → 易;
+    多 candidate / 弱约束 → 树宽 → nodes 大 → 难."""
+    n = len(grid)
+    color_cells: dict[int, list[tuple[int, int]]] = {}
+    for r in range(n):
+        for c in range(n):
+            color_cells.setdefault(grid[r][c], []).append((r, c))
+    color_order = sorted(color_cells.keys(), key=lambda k: len(color_cells[k]))
+
+    row_col = [-1] * n
+    used_cols = 0
+    nodes = 0
+
+    def bt(idx: int) -> None:
+        nonlocal used_cols, nodes
+        nodes += 1
+        if idx == n:
+            return
+        for r, c in color_cells[color_order[idx]]:
+            if row_col[r] >= 0:
+                continue
+            bc = 1 << c
+            if used_cols & bc:
+                continue
+            if r > 0 and row_col[r - 1] >= 0 and abs(row_col[r - 1] - c) <= 1:
+                continue
+            if r < n - 1 and row_col[r + 1] >= 0 and abs(row_col[r + 1] - c) <= 1:
+                continue
+            row_col[r] = c
+            used_cols |= bc
+            bt(idx + 1)
+            row_col[r] = -1
+            used_cols ^= bc
+
+    bt(0)
+    return nodes
+
+
 def count_solutions(grid: Grid, limit: int = 2) -> int:
     """数解的个数 (按颜色稀有度回溯, 同 solve)."""
     n = len(grid)

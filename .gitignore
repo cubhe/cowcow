@@ -5,3 +5,5 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+# bake 增量保存的 checkpoint, 完成后自动清掉
+n*_checkpoint.json
