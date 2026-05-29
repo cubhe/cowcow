@@ -51,6 +51,13 @@
   .status .num { font-weight: 600; }
   .status.win { background: var(--ok); color: white; }
   .status.bad { background: #ffe5e5; color: var(--accent); }
+  .timer {
+    background: var(--panel); padding: 8px 14px; border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08); font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .timer .best { color: var(--muted); }
+  .timer .new-best { color: var(--ok); font-weight: 600; }
   #board {
     display: grid; gap: var(--gap);
     background: var(--panel); padding: var(--gap); border-radius: var(--radius);
@@ -120,6 +127,8 @@
       <option value="8">8×8 (生成稍慢)</option>
       <option value="9">9×9 (预生成)</option>
       <option value="10">10×10 (预生成)</option>
+      <option value="11">11×11 (预生成)</option>
+      <option value="12">12×12 (预生成)</option>
     </select></label>
     <label>难度: <select id="difficulty">
       <option value="t1">★ 入门</option>
@@ -134,6 +143,7 @@
     <button id="solve">显示解</button>
     <button id="mute" title="切换音效">🔊</button>
     <span class="status" id="status">载入中...</span>
+    <span class="timer" id="timer">⏱ 0.0s · 最快 <span class="best">-</span></span>
   </div>
 
   <div id="board"></div>
@@ -146,16 +156,20 @@
 
 <script src="puzzles_pool.js"></script>
 <script>
-// ---------------- 调色板 (8 色, 同色族只留一个; 前 5 个跨色环, N=5 时最分明) ----------------
+// ---------------- 调色板 (12 色, 覆盖 N≤12 不撞色) ----------------
 const PALETTE = [
   "hsl(0, 70%, 62%)",     // 红
-  "hsl(210, 65%, 60%)",   // 蓝   (跨色环到对面)
+  "hsl(210, 65%, 60%)",   // 蓝
   "hsl(50, 80%, 58%)",    // 金黄
-  "hsl(125, 45%, 48%)",   // 绿  (与蓝相距 85°, 与黄相距 75°)
+  "hsl(125, 45%, 48%)",   // 绿
   "hsl(285, 45%, 60%)",   // 紫
   "hsl(28, 80%, 58%)",    // 橙
   "hsl(330, 60%, 65%)",   // 粉
   "hsl(20, 30%, 48%)",    // 棕
+  "hsl(175, 55%, 48%)",   // 青
+  "hsl(0, 0%, 62%)",      // 灰
+  "hsl(245, 35%, 55%)",   // 靛  (深蓝紫, 与蓝 210 距 35° + 明度更暗)
+  "hsl(85, 35%, 52%)",    // 黄绿  (与金 50 距 35° + 与绿 125 距 40°)
 ];
 
 const COW = "🐮";
@@ -419,9 +433,28 @@ async function loadNew(n) {
     unique: result.unique,
     solSet, nColors: colors.size,
     pulses: {},  // key "r,c" -> "right"|"wrong"
+    startMs: performance.now(),
+    won: false, cheated: false, finishMs: 0, justBestImproved: false,
   };
   render();
 }
+
+// ---------------- 计时器 + 最佳成绩 ----------------
+function bestKey() {
+  const diff = document.getElementById("difficulty").value;
+  return `cowcow_best_${G.n}_${diff}`;
+}
+function updateTimerDisplay() {
+  const el = document.getElementById("timer");
+  if (!G) { el.innerHTML = `⏱ 0.0s · 最快 <span class="best">-</span>`; return; }
+  const t = ((G.won ? G.finishMs : performance.now()) - G.startMs) / 1000;
+  const prev = parseFloat(localStorage.getItem(bestKey()));
+  const bestStr = isNaN(prev) ? "-" : `${prev.toFixed(1)}s`;
+  const cls = G.justBestImproved ? "new-best" : "best";
+  const tag = G.cheated && G.won ? " ⛔" : "";
+  el.innerHTML = `⏱ ${t.toFixed(1)}s · 最快 <span class="${cls}">${bestStr}</span>${tag}`;
+}
+setInterval(updateTimerDisplay, 100);
 
 // ---------------- 渲染 ----------------
 function render() {
@@ -500,9 +533,21 @@ function updateStatus(conflicts) {
   }
   const status = document.getElementById("status");
   if (correct === n && cows === n) {
-    if (status.className !== "status win") {
+    if (!G.won) {
+      G.won = true;
+      G.finishMs = performance.now();
+      const t = (G.finishMs - G.startMs) / 1000;
+      if (!G.cheated) {
+        const key = bestKey();
+        const prev = parseFloat(localStorage.getItem(key));
+        if (isNaN(prev) || t < prev) {
+          localStorage.setItem(key, t.toFixed(2));
+          G.justBestImproved = true;
+        }
+      }
       vibrate([80, 40, 80, 40, 120]);
       soundWin();
+      updateTimerDisplay();
     }
     status.className = "status win";
     status.innerHTML = `🎉 完成! ${n}×${n}`;
@@ -678,6 +723,7 @@ document.getElementById("clear").addEventListener("click", () => {
 document.getElementById("solve").addEventListener("click", () => {
   const sol = solve(G.grid);
   if (!sol) return;
+  G.cheated = true;
   G.marks = Array.from({length: G.n}, () => Array(G.n).fill(MARK_EMPTY));
   sol.forEach(([r, c]) => G.marks[r][c] = MARK_COW);
   render();
@@ -685,6 +731,7 @@ document.getElementById("solve").addEventListener("click", () => {
 document.getElementById("hint").addEventListener("click", () => {
   const sol = solve(G.grid);
   if (!sol) return;
+  G.cheated = true;
   for (const [r, c] of sol) {
     if (G.marks[r][c] !== MARK_COW) {
       G.marks[r][c] = MARK_COW;
