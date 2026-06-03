@@ -272,6 +272,112 @@ def generate(n: int, seed: Optional[int] = None,
     return best
 
 
+# ---------- 唯一解修复出题 (大 N 高良率) ----------
+#
+# flood 出来的盘大 N 几乎必多解 (N=12 良率 < 5e-6). 这里用"修复"思路:
+# 先 flood 一个连通染色, 再反复找 alt 解、把 alt 用到的某个非解格改色,
+# 杀掉该 alt 同时保持 (a) 目标解 sol 始终合法, (b) 每个区域连通.
+# N=12 良率提到 ~1.5%, 比纯随机快 3000×.
+
+def _two_solutions(grid: Grid) -> List[Tuple[int, ...]]:
+    """返回至多 2 个完整解 (每个是 row->col 的 tuple). 长度==1 即唯一."""
+    n = len(grid)
+    color_cells: dict[int, list[tuple[int, int]]] = {}
+    for r in range(n):
+        for c in range(n):
+            color_cells.setdefault(grid[r][c], []).append((r, c))
+    color_order = sorted(color_cells.keys(), key=lambda k: len(color_cells[k]))
+    row_col = [-1] * n
+    used_cols = 0
+    out: List[Tuple[int, ...]] = []
+
+    def bt(idx: int) -> None:
+        nonlocal used_cols
+        if len(out) >= 2:
+            return
+        if idx == n:
+            out.append(tuple(row_col))
+            return
+        for r, c in color_cells[color_order[idx]]:
+            if row_col[r] >= 0:
+                continue
+            bc = 1 << c
+            if used_cols & bc:
+                continue
+            if r > 0 and row_col[r - 1] >= 0 and abs(row_col[r - 1] - c) <= 1:
+                continue
+            if r < n - 1 and row_col[r + 1] >= 0 and abs(row_col[r + 1] - c) <= 1:
+                continue
+            row_col[r] = c
+            used_cols |= bc
+            bt(idx + 1)
+            row_col[r] = -1
+            used_cols ^= bc
+            if len(out) >= 2:
+                return
+
+    bt(0)
+    return out
+
+
+def _region_connected(grid: Grid, color: int, n: int,
+                      protected: Tuple[int, int]) -> bool:
+    """区域 color 仍连通且仍含其保护格 (目标解里该色的牛格)."""
+    from collections import deque
+    cells = [(r, c) for r in range(n) for c in range(n) if grid[r][c] == color]
+    if not cells or protected not in cells:
+        return False
+    seen = {protected}
+    dq = deque([protected])
+    while dq:
+        r, c = dq.popleft()
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < n and 0 <= nc < n and grid[nr][nc] == color and (nr, nc) not in seen:
+                seen.add((nr, nc))
+                dq.append((nr, nc))
+    return len(seen) == len(cells)
+
+
+def generate_unique(n: int, seed: Optional[int] = None,
+                    repair_steps: int = 500) -> Optional[Tuple[Grid, Solution]]:
+    """修复式生成唯一解 N×N 谜题. 成功返回 (grid, sol), 卡住返回 None.
+
+    每次 attempt: flood 一盘 → 反复消 alt 解. 调用方应换 seed 重试直到拿到题.
+    """
+    rng = random.Random(seed)
+    sol = _random_placement(n, rng)
+    if sol is None:
+        return None
+    grid = _flood_color(n, sol, rng)
+    sol_cells = set(sol)
+    protected = {grid[r][c]: (r, c) for (r, c) in sol}      # color -> 牛格
+    intended = tuple(c for _r, c in sorted(sol))
+    for _ in range(repair_steps):
+        sols = _two_solutions(grid)
+        if len(sols) == 1:
+            return grid, sol
+        alt = sols[0] if sols[0] != intended else sols[1]
+        diff = [(r, alt[r]) for r in range(n) if (r, alt[r]) not in sol_cells]
+        rng.shuffle(diff)
+        for (r, c) in diff:
+            a = grid[r][c]
+            neigh = [(r + dr, c + dc) for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))]
+            cand = {grid[nr][nc] for nr, nc in neigh
+                    if 0 <= nr < n and 0 <= nc < n and grid[nr][nc] != a}
+            for b in cand:
+                grid[r][c] = b
+                if _region_connected(grid, a, n, protected[a]):
+                    break
+                grid[r][c] = a
+            else:
+                continue
+            break
+        else:
+            return None        # 无可改格, 放弃这盘
+    return None
+
+
 # ---------- 输出 ----------
 
 _PALETTE = [
