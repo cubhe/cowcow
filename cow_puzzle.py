@@ -178,9 +178,13 @@ def _random_placement(n: int, rng: random.Random) -> Optional[Solution]:
     return placements if bt(0) else None
 
 
-def _flood_color(n: int, seeds: Solution, rng: random.Random) -> Grid:
+def _flood_color(n: int, seeds: Solution, rng: random.Random,
+                 min_small: int = 1) -> Grid:
     """各色轮流扩, 但给每色随机一个 size cap (1..N+2) -> 区域大小分布更不均.
-    单元格/小区域强制唯一定位 -> 唯一解概率显著提升."""
+    单元格/小区域强制唯一定位 -> 唯一解概率显著提升.
+
+    min_small: 小区域 cap 下限 (默认 1 = 允许单格强约束;
+               设 2 = 禁止单色块, 题目更难)."""
     grid: Grid = [[-1] * n for _ in range(n)]
     fronts: List[List[Tuple[int, int]]] = [[] for _ in range(n)]
     sizes = [1] * n  # 当前已染色数
@@ -188,11 +192,11 @@ def _flood_color(n: int, seeds: Solution, rng: random.Random) -> Grid:
     base = (n * n) / n  # 平均 N
     caps: List[int] = []
     while True:
-        caps = [max(1, int(rng.gauss(base, base * 0.55))) for _ in range(n)]
-        # 让 1-2 个区域强制为 1-2 格 (强约束)
+        caps = [max(min_small, int(rng.gauss(base, base * 0.55))) for _ in range(n)]
+        # 让 1-2 个区域强制为小区域 (强约束); min_small=2 时即最小 2 格
         small_n = rng.randint(1, max(1, n // 4))
         for i in rng.sample(range(n), small_n):
-            caps[i] = rng.randint(1, 2)
+            caps[i] = rng.randint(min_small, max(min_small, 2))
         if sum(caps) >= n * n:
             break
 
@@ -321,11 +325,11 @@ def _two_solutions(grid: Grid) -> List[Tuple[int, ...]]:
 
 
 def _region_connected(grid: Grid, color: int, n: int,
-                      protected: Tuple[int, int]) -> bool:
-    """区域 color 仍连通且仍含其保护格 (目标解里该色的牛格)."""
+                      protected: Tuple[int, int], min_region: int = 1) -> bool:
+    """区域 color 仍连通、仍含其保护格、且大小 >= min_region."""
     from collections import deque
     cells = [(r, c) for r in range(n) for c in range(n) if grid[r][c] == color]
-    if not cells or protected not in cells:
+    if not cells or protected not in cells or len(cells) < min_region:
         return False
     seen = {protected}
     dq = deque([protected])
@@ -340,19 +344,29 @@ def _region_connected(grid: Grid, color: int, n: int,
 
 
 def generate_unique(n: int, seed: Optional[int] = None,
-                    repair_steps: int = 500) -> Optional[Tuple[Grid, Solution]]:
+                    repair_steps: int = 500,
+                    min_region: int = 1) -> Optional[Tuple[Grid, Solution]]:
     """修复式生成唯一解 N×N 谜题. 成功返回 (grid, sol), 卡住返回 None.
 
     每次 attempt: flood 一盘 → 反复消 alt 解. 调用方应换 seed 重试直到拿到题.
+
+    min_region: 每个色块的最小格数 (默认 1). 设 2 = 禁止单色块 (没有
+                "一格即定位"的强约束), 题目显著更难 ("地狱级").
     """
     rng = random.Random(seed)
     sol = _random_placement(n, rng)
     if sol is None:
         return None
-    grid = _flood_color(n, sol, rng)
+    grid = _flood_color(n, sol, rng, min_small=min_region)
     sol_cells = set(sol)
     protected = {grid[r][c]: (r, c) for (r, c) in sol}      # color -> 牛格
     intended = tuple(c for _r, c in sorted(sol))
+    if min_region > 1:
+        # flood 仍可能留下小于下限的区域, 直接弃 (换 seed 重来)
+        from collections import Counter
+        szc = Counter(v for row in grid for v in row)
+        if min(szc.values()) < min_region:
+            return None
     for _ in range(repair_steps):
         sols = _two_solutions(grid)
         if len(sols) == 1:
@@ -367,7 +381,8 @@ def generate_unique(n: int, seed: Optional[int] = None,
                     if 0 <= nr < n and 0 <= nc < n and grid[nr][nc] != a}
             for b in cand:
                 grid[r][c] = b
-                if _region_connected(grid, a, n, protected[a]):
+                # 改色后 a 仍连通、含保护格、且不小于 min_region
+                if _region_connected(grid, a, n, protected[a], min_region):
                     break
                 grid[r][c] = a
             else:
