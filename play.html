@@ -577,11 +577,22 @@ function cellAtPoint(x, y) {
   return null;
 }
 
-function paintX(r, c) {
+// dragMode: "paint" 起点是空 -> 拖过的都标 X; "erase" 起点是 X -> 拖过的都清掉
+let dragMode = null;
+
+function paintCell(r, c) {
   if (G.marks[r][c] === MARK_COW) return;
-  if (G.marks[r][c] === MARK_X) return;
-  G.marks[r][c] = MARK_X;
-  render();
+  if (dragMode === "paint") {
+    if (G.marks[r][c] !== MARK_X) {
+      G.marks[r][c] = MARK_X;
+      render();
+    }
+  } else if (dragMode === "erase") {
+    if (G.marks[r][c] === MARK_X) {
+      G.marks[r][c] = MARK_EMPTY;
+      render();
+    }
+  }
 }
 
 function vibrate(pattern) {
@@ -656,6 +667,8 @@ board.addEventListener("pointerdown", (e) => {
   const pt = cellAtPoint(e.clientX, e.clientY);
   if (!pt) return;
   dragging = true; dragMoved = false; downCell = pt;
+  // 起点是 X 就进入"擦除"模式, 起点是空就"涂 X"; 牛: 不动 (mode 仍按 paint 走但 paintCell 跳过 cow)
+  dragMode = (G.marks[pt[0]][pt[1]] === MARK_X) ? "erase" : "paint";
   try { board.setPointerCapture(e.pointerId); } catch (_) {}
 });
 
@@ -665,9 +678,9 @@ board.addEventListener("pointermove", (e) => {
   if (!pt) return;
   if (!dragMoved && (pt[0] !== downCell[0] || pt[1] !== downCell[1])) {
     dragMoved = true;
-    paintX(downCell[0], downCell[1]);
+    paintCell(downCell[0], downCell[1]);
   }
-  if (dragMoved) paintX(pt[0], pt[1]);
+  if (dragMoved) paintCell(pt[0], pt[1]);
 });
 
 board.addEventListener("pointerup", (e) => {
